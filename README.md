@@ -1,134 +1,168 @@
 # Android-Adware-Cleaner
 
-`adwscan.py` は、**ADB と logcat の `Displayed` イベント**を使って、
-Android 端末上の不審アプリ（特に HiddenAds 系を想定）を調査・隔離・削除支援する CLI ツールです。
+Android で「見覚えのない広告が急に出る」「ホーム画面が勝手に切り替わる」といった症状を調べるための、
+**ADB ベースの調査ツール**です。
 
-> ⚠️ このツールは端末のアプリ状態を変更できます。実行前に必ず内容を確認し、自己責任で使用してください。
-
----
-
-## できること
-
-- `monitor` : `Displayed` イベントを監視して、前面表示されたアプリを記録
-- `inventory` : ユーザーアプリ一覧を取得
-- `inspect` : 指定パッケージを調査してスコアリング
-- `quarantine` : `force-stop` + `disable-user`
-- `remove` : `force-stop` + `disable-user` + `uninstall --user 0`
-- `restore` : `enable` + `install-existing`
-- `auto` : 監視しながらスコアリングし、ポリシーに従って段階的対処（既定は dry-run）
+このリポジトリの `adwscan.py` は、
+**怪しいアプリを見つける → スコアで判断する → 段階的に止める** ところまでを支援します。
 
 ---
 
-## 前提条件
+## まず何ができる？
 
-- Python 3.10 以上（目安）
-- Android SDK Platform-Tools (`adb`) がインストール済みで、PATH が通っている
-- 端末側で USB デバッグ有効化・接続許可済み
+- 端末で前面表示されたアプリを監視する（`monitor`）
+- ユーザーアプリの一覧を出す（`inventory`）
+- 指定アプリの危険度を採点する（`inspect`）
+- 段階的に対処する
+  - 一時停止 + 無効化（`quarantine`）
+  - user 0 から削除（`remove`）
+  - 復元（`restore`）
+- 監視しながら自動判定する（`auto`、既定は dry-run）
 
-接続確認例:
+---
+
+## 3分で使う（最短手順）
+
+### 1) 準備
+
+- Python 3.10 以上
+- `adb` が使える状態（Android SDK Platform-Tools）
+- 端末で USB デバッグを有効化し、PC 接続を許可
+
+確認:
 
 ```bash
 adb devices
 adb get-state
 ```
 
----
-
-## 使い方
-
-### 1. ヘルプ
-
-```bash
-python3 adwscan.py --help
-```
-
-### 2. ユーザーアプリ一覧
+### 2) まずは状況確認
 
 ```bash
 python3 adwscan.py inventory
-python3 adwscan.py inventory --json
+python3 adwscan.py monitor
 ```
 
-### 3. 監視（Displayed イベント）
+- `monitor` で短時間観察すると、頻繁に前面表示されるパッケージが見えてきます。
+
+### 3) 怪しいパッケージを採点
+
+```bash
+python3 adwscan.py inspect com.example.suspicious
+```
+
+### 4) まずは安全側で対処（dry-run）
+
+```bash
+python3 adwscan.py quarantine com.example.suspicious
+```
+
+実際に実行する場合のみ `--commit` を付けます。
+
+```bash
+python3 adwscan.py quarantine com.example.suspicious --commit
+```
+
+---
+
+## コマンド一覧（やさしめ説明）
+
+### `monitor`
+`logcat` の `Displayed` イベントを監視し、
+「どのアプリが前面表示されたか」を記録します。
 
 ```bash
 python3 adwscan.py monitor
 python3 adwscan.py monitor --clear --show-raw
 ```
 
-### 4. 単体調査（スコア確認）
+### `inventory`
+ユーザーがインストールしたアプリ一覧を表示します。
+
+```bash
+python3 adwscan.py inventory
+python3 adwscan.py inventory --json
+```
+
+### `inspect <pkg>`
+指定パッケージの情報を集めてスコア化します。
 
 ```bash
 python3 adwscan.py inspect com.example.suspicious
 python3 adwscan.py inspect com.example.suspicious --json
 ```
 
-### 5. 隔離・削除・復元
-
-デフォルトは **dry-run（実行しない）** です。実行する場合は `--commit` を付けます。
+### `quarantine <pkg>`
+`force-stop` + `disable-user` を行います。
 
 ```bash
-# 隔離
 python3 adwscan.py quarantine com.example.suspicious
 python3 adwscan.py quarantine com.example.suspicious --commit
+```
 
-# 削除（user 0）
+### `remove <pkg>`
+`quarantine` に加えて `uninstall --user 0` を実行します。
+
+```bash
 python3 adwscan.py remove com.example.suspicious
 python3 adwscan.py remove com.example.suspicious --commit
+```
 
-# 復元
+### `restore <pkg>`
+`enable` + `install-existing` で復元を試みます。
+
+```bash
 python3 adwscan.py restore com.example.suspicious
 python3 adwscan.py restore com.example.suspicious --commit
 ```
 
-### 6. 自動モード
+### `auto`
+監視しながら自動で採点し、ポリシーに沿って対処します。
 
 ```bash
-# 既定は dry-run
+# 既定は dry-run（安全）
 python3 adwscan.py auto
 
 # 実際に対処を実行
 python3 adwscan.py auto --commit
 
-# しきい値や評価条件を調整
+# しきい値を調整
 python3 adwscan.py auto --min-count 3 --warn-threshold 45 --quarantine-threshold 80 --remove-threshold 105
 
-# remove まで許可（高リスク）
+# remove まで許可（慎重に）
 python3 adwscan.py auto --commit --aggressive-remove
 ```
 
 ---
 
-## スコアリングの概要
+## スコアは何を見ている？（ざっくり）
 
-主に以下のシグナルを合算します。
+以下を組み合わせて危険度を計算します。
 
-- `Displayed` の頻度（10分内）
-- パッケージ名の弱い疑わしさ
-- インストーラ元（Play Store 等かどうか）
-- APK パス（system 領域かどうか）
-- 危険寄り権限・AppOps 状態
-- `dumpsys package` 内の挙動テキスト（`BOOT_COMPLETED`, `USER_PRESENT` など）
-- 複合条件（例: overlay + accessibility）
+- 10分間で何回前面表示されたか
+- パッケージ名の傾向（広告/最適化系ワード）
+- インストーラ元が信頼できるか
+- 権限/AppOps（overlay, accessibility など）
+- `dumpsys package` 内の挙動シグナル（`BOOT_COMPLETED`, `USER_PRESENT` など）
 
-`system` 領域由来っぽいアプリは、削除を自動で抑制する安全弁が入っています。
+> `system` 領域にあるアプリは、誤操作を避けるため自動削除を抑制します。
 
 ---
 
-## 保存される状態ファイル
+## 保存されるファイル
 
 デフォルト保存先:
 
 - Windows: `%USERPROFILE%\.adwscan`
 - それ以外: `~/.adwscan`
 
-主なファイル:
+中身:
 
-- `allowlist.json` : 許可リスト（除外対象）
-- `state.json` : 最終検知時刻や action 済み記録
+- `allowlist.json` : 除外リスト
+- `state.json` : 実行済みアクションや最終検知時刻
 - `events.ndjson` : 監視イベントログ
 
-保存先を変える場合:
+保存先の変更:
 
 ```bash
 python3 adwscan.py --state-dir /path/to/state auto
@@ -136,14 +170,14 @@ python3 adwscan.py --state-dir /path/to/state auto
 
 ---
 
-## 注意事項
+## 大事な注意
 
-- 誤検知の可能性があります。特に `remove --commit` は慎重に。
-- `uninstall --user 0` は「ユーザー 0 からのアンインストール」であり、端末全体から APK を完全削除する動作ではありません。
-- 端末や OS 差分により、`dumpsys` / `appops` の出力形式が異なる場合があります。
+- 既定は dry-run です。**まず dry-run で確認**してください。
+- `remove --commit` は影響が大きいので、対象パッケージを十分確認してから実行してください。
+- `uninstall --user 0` は端末全体の APK 完全削除とは異なります。
 
 ---
 
 ## ライセンス
 
-必要に応じて本リポジトリの方針に合わせて追記してください。
+必要に応じて、このリポジトリ方針に合わせて追記してください。
