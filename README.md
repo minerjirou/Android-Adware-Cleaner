@@ -109,7 +109,3 @@ python3 adwscan.py --state-dir /path/to/state auto
 - 既定は dry-run です。実行する場合のみ `--commit` を付けてください。
 - `remove --commit` は影響が大きいため、対象パッケージを確認して実行してください。
 - `uninstall --user 0` は端末全体からの完全削除ではありません。
-
-## ライセンス
-
-必要に応じて追記してください。
