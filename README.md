@@ -180,7 +180,3 @@ python3 adwscan.py --state-dir /path/to/state auto
 - `uninstall --user 0` は端末全体の APK 完全削除とは異なります。
 
 ---
-
-## ライセンス
-
-必要に応じて、このリポジトリ方針に合わせて追記してください。
