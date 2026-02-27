@@ -200,6 +200,10 @@ class ADB:
                 f"ADB device not ready: {state!r}. USB debugging / authorization / adb devices を確認してください。"
             )
 
+    def kill_server(self):
+        # adwscan 終了時に adb プロセスを残さない
+        self.run("kill-server", timeout=10)
+
 
 # =========================
 # Core tool
@@ -836,6 +840,7 @@ def main():
     state_dir = Path(args.state_dir) if args.state_dir else None
     tool = AdwScan(adb=adb, base_dir=state_dir)
 
+    exit_code = 0
     try:
         if args.cmd == "monitor":
             tool.cmd_monitor(clear=args.clear, show_raw=args.show_raw)
@@ -874,21 +879,28 @@ def main():
 
         else:
             parser.print_help()
-            return 2
-        return 0
+            exit_code = 2
 
     except KeyboardInterrupt:
         eprint("\n[INFO] interrupted")
-        return 130
+        exit_code = 130
     except RuntimeError as ex:
         eprint(f"[ERROR] {ex}")
-        return 1
+        exit_code = 1
     except subprocess.TimeoutExpired as ex:
         eprint(f"[ERROR] timeout: {ex}")
-        return 1
+        exit_code = 1
     except FileNotFoundError:
         eprint("[ERROR] adb が見つかりません。Android SDK Platform-Tools の adb を PATH に通してください。")
-        return 1
+        exit_code = 1
+    finally:
+        try:
+            adb.kill_server()
+            eprint("[INFO] adb server stopped")
+        except Exception as ex:
+            eprint(f"[WARN] adb server stop failed: {ex}")
+
+    return exit_code
 
 
 if __name__ == "__main__":
